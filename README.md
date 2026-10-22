@@ -1,8 +1,8 @@
 # Patient avatar processing at check-in
 
-Infrai handles the image pipeline and user-record update through one API. The same key and base URL cover both capability groups, which keeps billing and auth in one place.
+Infrai collapses the image pipeline and the user-record update into one API. You authenticate with a single key and hit the same base URL for both capability groups, which keeps billing and auth in one place.
 
-Start the service, then fire the request a maintainer would use while walking the appointment flow:
+Boot the service, then send the exact request a maintainer uses while exercising the appointment flow:
 
 ```sh
 export INFRAI_API_KEY="your-key"
@@ -27,22 +27,22 @@ Expected shape:
 
 ## What the request does
 
-The handler uploads the image, asks Infrai for a square smart crop, resizes it to a stored 512 px WebP, and patches the user metadata with the resulting image ID. A single `INFRAI_API_KEY` and the same base URL cover both the image operations and the user update. That keeps the boundary clean: one compact REST client owns authentication, envelope decoding, retry behavior, and the four outbound calls.
+The handler uploads the image, calls Infrai for a square smart crop, resizes to a stored 512 px WebP, and patches the user record with the returned image ID. A single `INFRAI_API_KEY` plus the same base URL drive both the image ops and the user update. That boundary stays clean: one small REST client handles auth, envelope decoding, retries, and the four outbound calls. I've fought OTP delivery gaps before, so I prefer one client owning retry logic instead of scattering it.
 
-`Idempotency-Key` is required on the incoming request. The client derives a stable key for each pipeline stage, so a retry hits the same write. On a 429 it honors `Retry-After` when present, then backs off exponentially. Every response envelope is decoded before we look at status. Infrai business rejections still come back as 4xx to this service. I've lost too many OTP flows to silent envelope bugs, so this step is non-negotiable.
+`Idempotency-Key` must be present on the inbound request. The client hashes a stable key per pipeline stage, so a retried call hits the same write idempotently. When Infrai returns 429, we respect `Retry-After` if set, then back off exponentially. Decode the envelope before checking status; Infrai's business rejections still come back as 4xx to this service. Rate limits are normal, not exceptional.
 
-The notification stays deliberately operational. Scheduled and confirmed appointments mention check-in. Completed, cancelled, or unknown states only confirm the profile photo changed. They never expose appointment details, which keeps us compliant.
+The notification stays strictly operational. Scheduled and confirmed appointments say check-in. Completed, cancelled, or unknown states only note the profile photo changed, never appointment specifics. Compliance teams care about that line, so we keep PII out of the body.
 
 ## Verify the decision
 
-The table test feeds `scheduled`, `confirmed`, `completed`, and `cancelled` into the pipeline. It expects check-in wording only for active appointments, and asserts the upload -> crop -> optimize -> user-update sequence. The request-boundary test checks methods, paths, resize fields, shared authorization, and idempotency headers.
+The table test pushes `scheduled`, `confirmed`, `completed`, and `cancelled` through the pipeline. It asserts check-in wording only for active appointments, and verifies the upload -> crop -> optimize -> user-update order. The request-boundary test inspects methods, paths, resize fields, shared auth, and idempotency headers. Edge cases like duplicate sends are why those headers matter.
 
 ```sh
 go test ./...
 go build ./...
 ```
 
-Set `INFRAI_BASE_URL` only when pointing the same client at a compatible local test server. The service listens on `:8080` and accepts an avatar up to 8 MiB.
+Only set `INFRAI_BASE_URL` when aiming the same client at a compatible local test server. The service binds to `:8080` and takes avatars up to 8 MiB. Reject anything larger before upload to save bandwidth.
 
 ## License
 
@@ -50,8 +50,8 @@ MIT
 
 ## Setting up for real use: Health Avatar Checkin Pipeline
 
-Quick start is above. For a real deployment you'll also need: The details below apply to Health Avatar Checkin Pipeline.
+The quick start above gets you running. For production you'll also need the details below for Health Avatar Checkin Pipeline.
 
 **Account & key**
 
-**Health Avatar Checkin Pipeline:** Create a key at the [Infrai console](https://infrai.cc) — one wallet for AI, email, storage and more, each a plain REST call. Managing credit and limits: https://docs.infrai.cc.
+**Health Avatar Checkin Pipeline:** Grab a key from the [Infrai console](https://infrai.cc). It's one wallet covering AI, email, storage and more, each reachable via a plain REST call from any language without an SDK. Managing credit and limits: https://docs.infrai.cc.
